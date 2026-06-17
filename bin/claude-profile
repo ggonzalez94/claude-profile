@@ -53,8 +53,10 @@ state. Stable customization is bootstrapped from ~/.claude:
 Each profile is assigned a random session color, applied to the session name
 badge inside Claude Code by running /color at startup on bare launches, and a
 launch shortcut named claude-<profile> in ~/.local/bin, so after the first
-run you can start a profile with e.g. `claude-work`. Disable with
-CLAUDE_PROFILE_SET_CLAUDE_COLOR=0 / CLAUDE_PROFILE_SHORTCUTS=0.
+run you can start a profile with e.g. `claude-work`. A statusline showing the
+profile name (in its color) is configured so the active account stays visible
+without naming the session. Disable with CLAUDE_PROFILE_SET_CLAUDE_COLOR=0 /
+CLAUDE_PROFILE_SHORTCUTS=0 / CLAUDE_PROFILE_STATUSLINE=0.
 
 For account separation, auth/provider environment variables are always removed
 before Claude starts, so ANTHROPIC_API_KEY and similar variables cannot override
@@ -266,6 +268,93 @@ link_shared_item() {
   ln -s "$src" "$dst"
 }
 
+color_ansi() {
+  case "$1" in
+    red)    printf '31' ;;
+    green)  printf '32' ;;
+    yellow) printf '33' ;;
+    blue)   printf '34' ;;
+    purple) printf '35' ;;
+    cyan)   printf '36' ;;
+    pink)   printf '95' ;;
+    orange) printf '38;5;208' ;;
+    *)      printf '36' ;;
+  esac
+}
+
+# point the profile's settings.json at the statusline command, but never
+# clobber a statusline the user already configured
+ensure_statusline_setting() {
+  local settings="$1"
+  local command="$2"
+
+  local node_bin
+  node_bin="$(command -v node || true)"
+  if [[ -z "$node_bin" ]]; then
+    err "node is required to configure the statusline; skipping"
+    return 0
+  fi
+
+  "$node_bin" - "$settings" "$command" <<'NODE'
+const fs = require("fs");
+
+const file = process.argv[2];
+const command = process.argv[3];
+
+let settings = {};
+try {
+  settings = JSON.parse(fs.readFileSync(file, "utf8"));
+} catch (e) {
+  settings = {};
+}
+
+if (settings.statusLine) {
+  process.exit(0);
+}
+
+settings.statusLine = { type: "command", command };
+fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+NODE
+}
+
+# generate a tiny per-profile statusline that shows the profile name (in the
+# profile color) plus the working directory. This keeps the profile visible at
+# a glance without forcing it onto the session name, so chats keep their own
+# auto-generated names and stay searchable in claude --resume.
+ensure_statusline() {
+  local profile="$1"
+  local profile_dir="$2"
+  local color="$3"
+
+  if [[ "${CLAUDE_PROFILE_STATUSLINE:-1}" == "0" ]]; then
+    return 0
+  fi
+
+  local script="$profile_dir/statusline.sh"
+
+  if [[ -L "$script" ]]; then
+    err "refusing to write symlink: $script"
+    return 0
+  fi
+
+  local ansi
+  ansi="$(color_ansi "$color")"
+
+  cat > "$script" <<EOF
+#!/usr/bin/env bash
+# claude-profile statusline: $profile (auto-generated; safe to delete)
+input="\$(cat 2>/dev/null)"
+dir="\$(printf '%s' "\$input" | sed -n 's/.*"current_dir":"\\([^"]*\\)".*/\\1/p' | head -1)"
+[ -z "\$dir" ] && dir="\$(printf '%s' "\$input" | sed -n 's/.*"cwd":"\\([^"]*\\)".*/\\1/p' | head -1)"
+suffix=""
+[ -n "\$dir" ] && suffix=" · \${dir/#\$HOME/~}"
+printf '\\033[${ansi}m●\\033[0m $profile%s' "\$suffix"
+EOF
+  chmod 755 "$script"
+
+  ensure_statusline_setting "$profile_dir/settings.json" "bash \"$script\""
+}
+
 init_profile() {
   local profile="$1"
   validate_profile "$profile" || return $?
@@ -284,8 +373,10 @@ init_profile() {
     link_shared_item "$profile_dir" "$item"
   done
 
-  ensure_profile_color "$profile_dir" >/dev/null
+  local profile_color
+  profile_color="$(ensure_profile_color "$profile_dir")"
   write_shortcut "$profile"
+  ensure_statusline "$profile" "$profile_dir" "$profile_color"
 
   printf '%s\n' "$profile_dir"
 }

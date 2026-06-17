@@ -145,17 +145,39 @@ claude-profile-usage daily --since 2026-06-01
 This reports local token and estimated-cost history. It does not read OAuth
 tokens or call undocumented live quota endpoints.
 
+## Sessions Keep Their Own Names
+
+`claude-profile` does **not** name your Claude sessions. Each chat keeps Claude
+Code's own auto-generated name, derived from the conversation, so individual
+chats stay distinguishable and searchable in `claude --resume`. (Earlier
+versions forced every session to share the profile name, which made all of a
+profile's chats look identical in the resume picker.)
+
+The active profile stays visible through the [status line](#status-line) and the
+[profile color](#profile-colors) instead.
+
+## Status Line
+
+Each profile gets a small status line under the prompt showing the profile name
+(in its color) and the current directory, for example:
+
+```text
+● work · ~/projects/api
+```
+
+It is configured in the profile's `settings.json` and reads the profile from the
+generated `~/.claude-profiles/<profile>/statusline.sh`. An existing `statusLine`
+in your settings is never overwritten. Disable with:
+
+```sh
+CLAUDE_PROFILE_STATUSLINE=0 claude-profile work
+```
+
 ## Terminal Titles
 
-Interactive launches set the terminal title to the profile name (`claude:<profile>`),
-so you can tell which account a window belongs to.
-
-Each Claude session keeps Claude Code's own auto-generated name, derived from the
-conversation, so individual chats stay distinguishable and searchable in
-`claude --resume`. The wrapper no longer forces every session to share the
-profile name.
-
-Customize or disable the terminal title:
+At launch the terminal title is set to `claude:<profile>`. Claude Code manages
+the title while it runs, so this is mainly visible at startup; the status line
+above is the reliable in-session indicator. Customize or disable:
 
 ```sh
 CLAUDE_PROFILE_TITLE_PREFIX="cc:" claude-profile work
